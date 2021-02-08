@@ -1,0 +1,114 @@
+
+library(dplyr)
+library(readr)
+library(stringr)
+library(openxlsx)
+library(optparse)
+
+parser <- OptionParser()
+parser <- add_option(parser, c("-i", "--infile"),
+                     help = "Input file")
+parser <- add_option(parser, c("-o", "--outdir"), 
+                     help = "Output directory")
+parser <- add_option(parser, c("-s", "--fc_start"),
+                     help = "First cohort start date")
+parser <- add_option(parser, c("-e", "--fc_end"),
+                     help = "First cohort end date")
+parser <- add_option(parser, c("-d", "--sc_start"),
+                     help = "Second cohort start date")
+parser <- add_option(parser, c("-r", "--sc_end"),
+                     help = "Second cohort end date")
+args <- parse_args(parser)
+
+# function for aggregating finished ads stats during the first day for each micro-cohort within main cohort
+
+cohort_ads <- function(data, cohort_data, start, end){
+  ads_finished_cohort <- data.frame()
+  
+  start_end_diff <- as.integer(difftime(as.Date(end), as.Date(start), units = "days"))
+  
+  for (i in seq(as.Date(start), by = "day", length.out = start_end_diff + 1)){
+    coh_data <- cohort_data %>%
+      filter(as.Date(tsEvent) == as.Date(i, origin = "1970-01-01"))
+    
+    ads_finished_cohort <- rbind(ads_finished_cohort,
+                                 (data %>%
+                                    filter(idDevice %in% coh_data$idDevice,
+                                           eventName == "showAdsFinished",
+                                           as.Date(tsEvent) %in% seq(as.Date(i, origin = "1970-01-01"), by = "day", length.out = 1)) %>%
+                                    select(idDevice, params.value) %>%
+                                    count(idDevice, params.value) %>%
+                                    group_by(params.value) %>%
+                                    summarise(cohort_mean = sum(n) / nrow(coh_data),
+                                              cohort_mean_watchers = sum(n) / length(unique(idDevice)))))
+  }
+  ads_finished_cohort <- ads_finished_cohort %>%
+    group_by(params.value) %>%
+    summarise(cohort_avg = mean(cohort_mean),
+              cohort_avg_watchers = mean(cohort_mean_watchers))
+  
+  return(ads_finished_cohort)
+}
+
+# function to subset main cohorts
+
+cohort_subset <- function(data, start, end){
+  cohort <- data %>%
+    filter(as.Date(tsEvent) >= start,
+           as.Date(tsEvent) <= end)
+  
+  return(cohort)
+}
+
+# main function to create a table
+
+main <- function(args){
+  base <- sub(".csv", "", basename(args$infile))
+  
+  data <- read.csv(args$infile) %>%
+    mutate(tsEvent = as.POSIXct(tsEvent, origin = "1970-01-01")) %>%
+    arrange(idDevice, tsEvent)
+  
+  cohorts <- data %>%
+    group_by(idDevice) %>%
+    slice(1) %>%
+    ungroup() %>%
+    filter(eventName == "maxOpenBlock",
+           params.value == "['1']") %>%
+    select(idDevice, tsEvent)
+  
+  first_cohort <- cohort_subset(data = cohorts,
+                                start = args$fc_start,
+                                end = args$fc_end)
+  
+  second_cohort <- cohort_subset(data = cohorts,
+                                 start = args$sc_start,
+                                 end = args$sc_end)
+  
+  ads_finished_first_cohort <- cohort_ads(data = data,
+                                          cohort_data = first_cohort,
+                                          start = args$fc_start,
+                                          end = args$fc_end) %>%
+    rename(first_cohort_avg = cohort_avg,
+           first_cohort_avg_watchers = cohort_avg_watchers)
+  
+  ads_finished_second_cohort <- cohort_ads(data = data,
+                                           cohort_data = second_cohort,
+                                           start = args$sc_start,
+                                           end = args$sc_end) %>%
+    rename(second_cohort_avg = cohort_avg,
+           second_cohort_avg_watchers = cohort_avg_watchers)
+  
+  cohort_ads_finished <- full_join(ads_finished_first_cohort,
+                                   ads_finished_second_cohort,
+                                   by = "params.value") %>%
+    mutate(diff = second_cohort_avg - first_cohort_avg,
+           diff_watchers = second_cohort_avg_watchers - first_cohort_avg_watchers)
+  
+  write.xlsx(cohort_ads_finished, paste(args$outdir, "/", base, ".cohort_ads_finished.xlsx", sep = "", collapse = ""))
+}
+
+main(args)
+
+
+
