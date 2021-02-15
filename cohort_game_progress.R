@@ -1,4 +1,3 @@
-
 library(dplyr)
 library(readr)
 library(stringr)
@@ -14,20 +13,25 @@ parser <- add_option(parser, c("-s", "--fc_start"),
                      help = "First cohort start date")
 parser <- add_option(parser, c("-e", "--fc_end"),
                      help = "First cohort end date")
+parser <- add_option(parser, c("-c", "--fc_country"),
+                     help = "First cohort country")
 parser <- add_option(parser, c("-d", "--sc_start"),
                      help = "Second cohort start date")
 parser <- add_option(parser, c("-r", "--sc_end"),
                      help = "Second cohort end date")
+parser <- add_option(parser, c("-b", "--sc_country"),
+                     help = "Second cohort country")
 parser <- add_option(parser, c("-v", "--interval"),
                      help = "Event interval")
 args <- parse_args(parser)
 
 # Subsetting cohort data
 
-cohort_subset <- function(data, start, end){
+cohort_subset <- function(data, start, end, country){
   cohort <- data %>%
     filter(as.Date(tsEvent) >= start,
-           as.Date(tsEvent) <= end)
+           as.Date(tsEvent) <= end,
+           idCountryISOAlpha2 == country)
   
   return(cohort)
 }
@@ -80,15 +84,17 @@ main <- function(args){
     ungroup() %>%
     filter(eventName == "maxOpenBlock",
            params.value == "['1']") %>%
-    select(idDevice, tsEvent)
+    select(idCountryISOAlpha2, idDevice, tsEvent)
   
   first_cohort <- cohort_subset(data = cohorts,
                                 start = args$fc_start,
-                                end = args$fc_end)
+                                end = args$fc_end,
+                                country = args$fc_country)
   
   second_cohort <- cohort_subset(data = cohorts,
                                  start = args$sc_start,
-                                 end = args$sc_end)
+                                 end = args$sc_end,
+                                 country = args$sc_country)
   
   game_progress_first_cohort <- cohort_progress(data = data,
                                                 cohort_data = first_cohort,
@@ -114,6 +120,7 @@ main <- function(args){
 
 
 main(args)
+
 
 
 
