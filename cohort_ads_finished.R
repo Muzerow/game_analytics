@@ -29,8 +29,8 @@ args <- parse_args(parser)
 
 cohort_subset <- function(data, start, end, country){
   cohort <- data %>%
-    filter(as.Date(tsEvent) >= start,
-           as.Date(tsEvent) <= end,
+    filter(as.Date(tsInstall) >= start,
+           as.Date(tsInstall) <= end,
            idCountryISOAlpha2 == country)
   
   return(cohort)
@@ -45,7 +45,7 @@ cohort_ads <- function(data, cohort_data, start, end, interval){
   
   for (i in seq(as.Date(start), by = "day", length.out = start_end_diff + 1)){
     coh_data <- cohort_data %>%
-      filter(as.Date(tsEvent) == as.Date(i, origin = "1970-01-01"))
+      filter(as.Date(tsInstall) == as.Date(i, origin = "1970-01-01"))
     
     new_data <- data %>%
       filter(idDevice %in% coh_data$idDevice,
@@ -77,16 +77,13 @@ main <- function(args){
   base <- sub(".csv", "", basename(args$infile))
   
   data <- read.csv(args$infile) %>%
-    mutate(tsEvent = as.POSIXct(tsEvent, origin = "1970-01-01")) %>%
+    mutate(tsInstall = as.POSIXct(tsInstall, origin = "1970-01-01"),
+           tsEvent = as.POSIXct(tsEvent, origin = "1970-01-01")) %>%
     arrange(idDevice, tsEvent)
   
   cohorts <- data %>%
-    group_by(idDevice) %>%
-    slice(1) %>%
-    ungroup() %>%
-    filter(eventName == "maxOpenBlock",
-           params.value == "['1']") %>%
-    select(idCountryISOAlpha2, idDevice, tsEvent)
+    select(idCountryISOAlpha2, idDevice, tsInstall) %>%
+    distinct(idCountryISOAlpha2, idDevice, tsInstall)
   
   first_cohort <- cohort_subset(data = cohorts,
                                 start = args$fc_start,
