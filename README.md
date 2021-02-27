@@ -16,7 +16,13 @@ For reproducibility it uses **optparse** package and includes six required param
 
 * **-i** Input file is the raw dataset with the game custom events
 * **-o** Output directory is the folder to put resulting file in
-* **-s**
-* **-e**
-* **-d**
-* **-r**
+* **-s** Date from which the first cohort starts
+* **-e** Date in which the first cohort ends
+* **-c** Country of the first cohort
+* **-d** Date from which the second cohort starts
+* **-r** Date in which the second cohort ends
+* **-b** Country of the second cohort
+* **-v** The number of first days in the game to calculate statistics on (eg, if 1 specified, then the statistics is calculated as the mean values for the first day in the game)
+* **-q** Chosen event for calculation
+
+**Note:** if the calculations should be done without filtering countries, specify "All" in country argument.
