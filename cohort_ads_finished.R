@@ -23,6 +23,8 @@ parser <- add_option(parser, c("-b", "--sc_country"),
                      help = "Second cohort country")
 parser <- add_option(parser, c("-v", "--interval"),
                      help = "Event interval")
+parser <- add_option(parser, c("-q", "--event"),
+                     help = "Chosen event to calculate")
 args <- parse_args(parser)
 
 # function to subset main cohorts
@@ -30,15 +32,19 @@ args <- parse_args(parser)
 cohort_subset <- function(data, start, end, country){
   cohort <- data %>%
     filter(as.Date(tsInstall) >= start,
-           as.Date(tsInstall) <= end,
-           idCountryISOAlpha2 == country)
+           as.Date(tsInstall) <= end)
+  
+  if (country != "All") {
+    cohort <- cohort %>%
+      filter(idCountryISOAlpha2 == country)
+  }
   
   return(cohort)
 }
 
 # function for aggregating finished ads stats during the first day for each micro-cohort within main cohort
 
-cohort_ads <- function(data, cohort_data, start, end, interval){
+cohort_ads <- function(data, cohort_data, start, end, interval, event){
   ads_finished_cohort <- data.frame()
   
   start_end_diff <- as.integer(difftime(as.Date(end), as.Date(start), units = "days"))
@@ -49,7 +55,7 @@ cohort_ads <- function(data, cohort_data, start, end, interval){
     
     new_data <- data %>%
       filter(idDevice %in% coh_data$idDevice,
-             eventName == "showAdsFinished",
+             eventName == event,
              as.Date(tsEvent) %in% seq(as.Date(i, origin = "1970-01-01"), by = "day",
                                        length.out = as.numeric(interval))) %>%
       select(idDevice, params.value) %>%
@@ -99,7 +105,8 @@ main <- function(args){
                                           cohort_data = first_cohort,
                                           start = args$fc_start,
                                           end = args$fc_end,
-                                          interval = args$interval) %>%
+                                          interval = args$interval,
+                                          event = args$event) %>%
     rename(first_cohort_avg = cohort_avg,
            first_cohort_avg_watchers = cohort_avg_watchers)
   
@@ -107,7 +114,8 @@ main <- function(args){
                                            cohort_data = second_cohort,
                                            start = args$sc_start,
                                            end = args$sc_end,
-                                           interval = args$interval) %>%
+                                           interval = args$interval,
+                                           event = args$event) %>%
     rename(second_cohort_avg = cohort_avg,
            second_cohort_avg_watchers = cohort_avg_watchers)
   
