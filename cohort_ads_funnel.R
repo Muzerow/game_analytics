@@ -12,8 +12,16 @@ parser <- add_option(parser, c("-s", "--fc_start"),
                      help = "First cohort start date")
 parser <- add_option(parser, c("-e", "--fc_end"),
                      help = "First cohort end date")
+parser <- add_option(parser, c("-d", "--sc_start"),
+                     help = "Second cohort start date")
+parser <- add_option(parser, c("-r", "--sc_end"),
+                     help = "Second cohort end date")
 parser <- add_option(parser, c("-v", "--interval"),
                      help = "Event interval")
+parser <- add_option(parser, c("-w", "--window"),
+                     help = "Window name player should open")
+parser <- add_option(parser, c("-a", "--ad"),
+                     help = "Ad name player should watch")
 args <- parse_args(parser)
 
 cohort_subset <- function(data, start, end){
@@ -24,7 +32,7 @@ cohort_subset <- function(data, start, end){
   return(cohort)
 }
 
-cohort_ads_stats <- function(data, cohort_data, start, end, interval){
+cohort_ads_stats <- function(data, cohort_data, start, end, interval, window, ad){
   num_events_cohort_data <- data.frame()
   num_unique_events_cohort_data <- data.frame()
   
@@ -39,7 +47,7 @@ cohort_ads_stats <- function(data, cohort_data, start, end, interval){
     new_data <- data %>%
       filter(idDevice %in% coh_data$idDevice,
              eventName %in% c("openPopup", "showAdsClicked", "showAdsFinished"),
-             params.value %in% c("['boost']", "['BoostRewardedVideo']"),
+             params.value %in% c(window, ad),
              as.Date(tsEvent) %in% seq(as.Date(i, origin = "1970-01-01"), by = "day",
                                        length.out = as.numeric(interval)))
     
@@ -92,14 +100,45 @@ main <- function(args){
                                 start = args$fc_start,
                                 end = args$fc_end)
   
+  second_cohort <- cohort_subset(data = cohorts,
+                                 start = args$sc_start,
+                                 end = args$sc_end)
+  
   ads_stats_first_cohort <- cohort_ads_stats(data = data,
                                              cohort_data = first_cohort,
                                              start = args$fc_start,
                                              end = args$fc_end,
-                                             interval = args$interval)
+                                             interval = args$interval,
+                                             window = args$window,
+                                             ad = args$ad) %>%
+    rename(mean_num_events_first_cohort = mean_num_events,
+           mean_events_per_user_first_cohort = mean_events_per_user,
+           mean_num_unique_events_first_cohort = mean_num_unique_events,
+           mean_users_made_event_first_cohort = mean_users_made_event)
   
-
-  ads_stats_first_cohort %>%
+  ads_stats_second_cohort <- cohort_ads_stats(data = data,
+                                              cohort_data = second_cohort,
+                                              start = args$sc_start,
+                                              end = args$sc_end,
+                                              interval = args$interval,
+                                              window = args$window,
+                                              ad = args$ad) %>%
+    rename(mean_num_events_second_cohort = mean_num_events,
+           mean_events_per_user_second_cohort = mean_events_per_user,
+           mean_num_unique_events_second_cohort = mean_num_unique_events,
+           mean_users_made_event_second_cohort = mean_users_made_event)
+  
+  ads_stats <- ads_stats_first_cohort %>%
+    full_join(ads_stats_second_cohort, by = "eventName") %>%
+    mutate(mne_diff = mean_num_events_second_cohort - mean_num_events_first_cohort,
+           mepu_diff = mean_events_per_user_second_cohort - mean_events_per_user_first_cohort,
+           mnue_diff = mean_num_unique_events_second_cohort - mean_num_unique_events_first_cohort,
+           mume_diff = mean_users_made_event_second_cohort - mean_users_made_event_first_cohort)
+  
+  ads_stats[,c("eventName", "mean_num_events_first_cohort", "mean_num_events_second_cohort", "mne_diff",
+               "mean_events_per_user_first_cohort", "mean_events_per_user_second_cohort", "mepu_diff",
+               "mean_num_unique_events_first_cohort", "mean_num_unique_events_second_cohort", "mnue_diff",
+               "mean_users_made_event_first_cohort", "mean_users_made_event_second_cohort", "mume_diff")] %>%
     write.xlsx(paste(args$outdir, "/", base, ".cohort_ads_stats.xlsx", sep = "", collapse = ""))
 }
 
