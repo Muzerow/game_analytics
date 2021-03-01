@@ -27,6 +27,8 @@ parser <- add_option(parser, c("-t", "--item_type"),
                      help = "Type of item to calculate")
 parser <- add_option(parser, c("-x", "--block_reached"),
                      help = "Count proportion on users reached block")
+parser <- add_option(parser, c("-y", "--button_crafted"),
+                     help = "Button to calculate statsistics for")
 args <- parse_args(parser)
 
 # Subsetting cohorts
@@ -44,41 +46,41 @@ cohort_subset <- function(data, start, end, country){
   return(cohort)
 }
 
-item_create <- function(data, cohort_data, item) {
+item_create <- function(data, cohort_data, item, button) {
   coh_data <- data %>%
     filter(idDevice %in% cohort_data$idDevice,
            (str_detect(params.name, paste(item, "Helmet")) == T | str_detect(params.name, paste(item, "Chestplate")) == T |
               str_detect(params.name, paste(item, "Leggings")) == T | str_detect(params.name, paste(item, "Boots")) == T |
               str_detect(params.name, paste(item, "Pickaxe")) == T | str_detect(params.name, paste(item, "Sword")) == T |
-              str_detect(params.name, "MineButton") == T)) %>%
+              str_detect(params.name, button) == T)) %>%
     distinct(idDevice, params.name) %>%
     count(idDevice, params.name) %>%
     spread(params.name, n) %>%
     select(-idDevice) %>%
     mutate_all(funs(replace_na(.,0))) %>%
     mutate(total = rowSums(.)) %>%
-    mutate(one_item = ifelse(total - `['MineButton']` >= 1, 1, 0),
+    mutate(one_item = ifelse(total - !!sym(paste0("['",button,"']")) >= 1, 1, 0),
            sword_and_pickaxe = ifelse(!!sym(paste0("['",item," ","Sword","']")) == 1 &
                                         !!sym(paste0("['",item," ","Pickaxe","']")) == 1 &
-                                        total - `['MineButton']` == 2, 1, 0),
+                                        total - !!sym(paste0("['",button,"']")) == 2, 1, 0),
            pickaxe = ifelse(!!sym(paste0("['",item," ","Pickaxe","']")) == 1 &
-                              total - `['MineButton']` == 1, 1, 0),
+                              total - !!sym(paste0("['",button,"']")) == 1, 1, 0),
            sword = ifelse(!!sym(paste0("['",item," ","Sword","']")) == 1 &
-                            total - `['MineButton']` == 1, 1, 0),
+                            total - !!sym(paste0("['",button,"']")) == 1, 1, 0),
            one_equip = ifelse((total - !!sym(paste0("['",item," ","Pickaxe","']")) -
-                                 !!sym(paste0("['",item," ","Sword","']")) - `['MineButton']`) == 1, 1, 0),
+                                 !!sym(paste0("['",item," ","Sword","']")) - !!sym(paste0("['",button,"']"))) == 1, 1, 0),
            two_equip = ifelse((total - !!sym(paste0("['",item," ","Pickaxe","']")) -
-                                 !!sym(paste0("['",item," ","Sword","']")) - `['MineButton']`) == 2, 1, 0),
+                                 !!sym(paste0("['",item," ","Sword","']")) - !!sym(paste0("['",button,"']"))) == 2, 1, 0),
            three_equip = ifelse((total - !!sym(paste0("['",item," ","Pickaxe","']")) -
-                                   !!sym(paste0("['",item," ","Sword","']")) - `['MineButton']`) == 3, 1, 0),
+                                   !!sym(paste0("['",item," ","Sword","']")) - !!sym(paste0("['",button,"']"))) == 3, 1, 0),
            full_equip = ifelse((total - !!sym(paste0("['",item," ","Pickaxe","']")) -
-                                  !!sym(paste0("['",item," ","Sword","']")) - `['MineButton']`) == 4, 1, 0),
-           full_equip_and_tools = ifelse(total - `['MineButton']` == 6, 1, 0),
-           mine = `['MineButton']`) %>%
+                                  !!sym(paste0("['",item," ","Sword","']")) - !!sym(paste0("['",button,"']"))) == 4, 1, 0),
+           full_equip_and_tools = ifelse(total - !!sym(paste0("['",button,"']")) == 6, 1, 0),
+           button = !!sym(paste0("['",button,"']"))) %>%
     select(-!!sym(paste0("['",item," ","Pickaxe","']")), -!!sym(paste0("['",item," ","Sword","']")),
            -!!sym(paste0("['",item," ","Helmet","']")), -!!sym(paste0("['",item," ","Chestplate","']")),
            -!!sym(paste0("['",item," ","Leggings","']")), -!!sym(paste0("['",item," ","Boots","']")),
-           -`['MineButton']`, -total)
+           -!!sym(paste0("['",button,"']")), -total)
   
   item_cohort_data <- as.data.frame(colSums(coh_data)) %>%
     mutate(prop = `colSums(coh_data)` / nrow(cohort_data)) %>%
@@ -106,7 +108,7 @@ main <- function(args){
   }
   
   cohorts <- cohorts %>%
-    select(-eventName, -params.value)
+    distinct(idCountryISOAlpha2, idDevice, tsInstall)
   
   first_cohort <- cohort_subset(data = cohorts,
                                 start = args$fc_start,
@@ -120,13 +122,15 @@ main <- function(args){
   
   item_create_first_cohort <- item_create(data = data,
                                           cohort_data = first_cohort,
-                                          item = args$item_type) %>%
+                                          item = args$item_type,
+                                          button = args$button_crafted) %>%
     rename(n_first_cohort = `colSums(coh_data)`,
            prop_first_cohort = prop)
   
   item_create_second_cohort <- item_create(data = data,
                                            cohort_data = second_cohort,
-                                           item = args$item_type) %>%
+                                           item = args$item_type,
+                                           button = args$button_crafted) %>%
     rename(n_second_cohort = `colSums(coh_data)`,
            prop_second_cohort = prop)
   
