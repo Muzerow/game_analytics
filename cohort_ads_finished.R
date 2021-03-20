@@ -1,6 +1,7 @@
 library(dplyr)
 library(readr)
 library(stringr)
+library(lubridate)
 library(openxlsx)
 library(optparse)
 
@@ -55,9 +56,9 @@ cohort_ads <- function(data, cohort_data, start, end, interval, event){
     
     new_data <- data %>%
       filter(idDevice %in% coh_data$idDevice,
-             eventName == event,
-             as.Date(tsEvent) %in% seq(as.Date(i, origin = "1970-01-01"), by = "day",
-                                       length.out = as.numeric(interval))) %>%
+             eventName == event) %>%
+      mutate(install_interval = tsInstall + days(interval)) %>%
+      filter((tsEvent <= install_interval) == T) %>%
       select(idDevice, params.value) %>%
       count(idDevice, params.value)
     
@@ -127,7 +128,7 @@ main <- function(args){
   
   cohort_ads_finished[,c("params.value", "first_cohort_avg", "second_cohort_avg", "diff",
                          "first_cohort_avg_watchers", "second_cohort_avg_watchers", "diff_watchers")] %>%
-    write.xlsx(paste(args$outdir, "/", base, ".cohort_ads_finished.xlsx", sep = "", collapse = ""))
+    write.xlsx(paste(args$outdir, "/", base, ".cohort_ads_stats.xlsx", sep = "", collapse = ""))
 }
 
 main(args)
