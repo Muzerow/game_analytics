@@ -1,6 +1,7 @@
 library(dplyr)
 library(readr)
 library(stringr)
+library(lubridate)
 library(openxlsx)
 library(optparse)
 
@@ -30,8 +31,12 @@ args <- parse_args(parser)
 cohort_subset <- function(data, start, end, country){
   cohort <- data %>%
     filter(as.Date(tsInstall) >= start,
-           as.Date(tsInstall) <= end,
-           idCountryISOAlpha2 == country)
+           as.Date(tsInstall) <= end)
+  
+  if (country != "All") {
+    cohort <- cohort %>%
+      filter(idCountryISOAlpha2 == country)
+  }
   
   return(cohort)
 }
@@ -39,7 +44,8 @@ cohort_subset <- function(data, start, end, country){
 # Function to compute avg game progress for first n-days in the game
 
 cohort_progress <- function(data, cohort_data, start, end, interval){
-  game_progress_cohort <- data.frame()
+  game_progress_cohort <- as.data.frame(unique(filter(data, eventName == "maxOpenBlock")$params.value)) %>%
+    rename_at(1,~"params.value")
   
   start_end_diff <- as.integer(difftime(as.Date(end), as.Date(start), units = "days"))
   
@@ -48,23 +54,27 @@ cohort_progress <- function(data, cohort_data, start, end, interval){
     coh_data <- cohort_data %>%
       filter(as.Date(tsInstall) == as.Date(i, origin = "1970-01-01"))
     
-    game_progress_cohort <- rbind(game_progress_cohort,
-                                  (data %>%
-                                     filter(idDevice %in% coh_data$idDevice,
-                                            eventName == "maxOpenBlock",
-                                            as.Date(tsEvent) %in% seq(as.Date(i, origin = "1970-01-01"), by = "day",
-                                                                      length.out = as.numeric(interval))) %>%
-                                     distinct(idDevice, params.value) %>%
-                                     count(params.value) %>%
-                                     arrange(-n) %>%
-                                     mutate(prop = round(n / nrow(coh_data) * 100, 2))))
+    game_progress_cohort <- full_join(game_progress_cohort,
+                                      (data %>%
+                                         filter(idDevice %in% coh_data$idDevice,
+                                                eventName == "maxOpenBlock") %>%
+                                         mutate(install_interval = tsInstall + days(interval)) %>%
+                                         filter((tsEvent <= install_interval) == T) %>%
+                                         distinct(idDevice, params.value) %>%
+                                         count(params.value) %>%
+                                         arrange(-n) %>%
+                                         mutate(prop = round(n / nrow(coh_data) * 100, 2)) %>%
+                                         select(-n)),
+                                      by = "params.value")
   }
   
   game_progress_cohort <- game_progress_cohort %>%
-    group_by(params.value) %>%
-    summarise(cohort_avg = round(mean(prop), 2)) %>%
-    mutate(params.value = as.numeric(str_remove_all(params.value, "\\D+"))) %>% 
-    arrange(params.value)
+    mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .)))
+
+  game_progress_cohort$cohort_avg <- rowMeans(game_progress_cohort[,-1])
+  
+  game_progress_cohort <- game_progress_cohort %>%
+    select(params.value, cohort_avg)
   
   return(game_progress_cohort)
 }
@@ -110,14 +120,15 @@ main <- function(args){
   cohort_game_progress <- full_join(game_progress_first_cohort,
                                     game_progress_second_cohort,
                                     by = "params.value") %>%
-    mutate(diff = second_cohort_avg - first_cohort_avg)
+    mutate(diff = second_cohort_avg - first_cohort_avg,
+           params.value = as.numeric(str_remove_all(params.value, "\\D+"))) %>%
+    arrange(params.value)
   
   write.xlsx(cohort_game_progress, paste(args$outdir, "/", base, ".cohort_game_progress.xlsx", sep = "", collapse = ""))
 }  
 
 
 main(args)
-
 
 
 
