@@ -1,6 +1,7 @@
 library(car)
 library(data.table)
 library(dplyr)
+library(effsize)
 library(readr)
 library(stringr)
 library(lubridate)
@@ -110,9 +111,12 @@ cohort_difference_ttest <- function(first_cohort_data, second_cohort_data) {
       block_p_value <- t.test(block_data$block ~ block_data$cohort, var.equal = T)$p.value
     }
     
+    effect_size <- cohen.d(block_data$block ~ block_data$cohort, na.rm = T)$magnitude
+    
     difference_p_value <- rbind(difference_p_value,
                                 data.frame(params.value = i,
-                                           p_value = block_p_value))
+                                           p_value = block_p_value,
+                                           effect_size = effect_size))
   }
   
   difference_p_value <- difference_p_value %>%
@@ -181,6 +185,5 @@ main <- function(args){
 
 
 main(args)
-
 
 
