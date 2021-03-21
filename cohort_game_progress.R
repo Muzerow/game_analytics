@@ -1,7 +1,10 @@
+library(car)
+library(data.table)
 library(dplyr)
 library(readr)
 library(stringr)
 library(lubridate)
+library(janitor)
 library(openxlsx)
 library(optparse)
 
@@ -73,10 +76,49 @@ cohort_progress <- function(data, cohort_data, start, end, interval){
 
   game_progress_cohort$cohort_avg <- rowMeans(game_progress_cohort[,-1])
   
-  game_progress_cohort <- game_progress_cohort %>%
-    select(params.value, cohort_avg)
+  # game_progress_cohort <- game_progress_cohort %>%
+  #   select(params.value, cohort_avg)
   
   return(game_progress_cohort)
+}
+
+#
+
+cohort_difference_ttest <- function(first_cohort_data, second_cohort_data) {
+  first_cohort_data <- transpose(dplyr::select(first_cohort_data, -first_cohort_avg)) %>%
+    row_to_names(row_number = 1) %>%
+    mutate_all(as.numeric) %>%
+    mutate(cohort = "first_cohort")
+  
+  second_cohort_data <- transpose(dplyr::select(second_cohort_data, -second_cohort_avg)) %>%
+    row_to_names(row_number = 1) %>%
+    mutate_all(as.numeric) %>%
+    mutate(cohort = "second_cohort")
+  
+  cohort_data <- rbind(first_cohort_data, second_cohort_data)
+  
+  difference_p_value <- data.frame()
+  
+  for (i in colnames(select(cohort_data, -cohort))) {
+    block_data <- cohort_data %>%
+      select(!!sym(i), cohort) %>%
+      rename(block = !!sym(i))
+    
+    if (leveneTest(block_data$block ~ block_data$cohort)$`Pr(>F)`[1] < 0.01) {
+      block_p_value <- t.test(block_data$block ~ block_data$cohort)$p.value
+    } else {
+      block_p_value <- t.test(block_data$block ~ block_data$cohort, var.equal = T)$p.value
+    }
+    
+    difference_p_value <- rbind(difference_p_value,
+                                data.frame(params.value = i,
+                                           p_value = block_p_value))
+  }
+  
+  difference_p_value <- difference_p_value %>%
+    mutate(params.value = as.numeric(str_remove_all(params.value, "\\D+")))
+  
+  return(difference_p_value)
 }
 
 # main function to create a table
@@ -117,11 +159,21 @@ main <- function(args){
                                                  interval = args$interval) %>%
     rename(second_cohort_avg = cohort_avg)
   
+  p_value_data <- cohort_difference_ttest(game_progress_first_cohort, game_progress_second_cohort)
+  
+  game_progress_first_cohort <- game_progress_first_cohort %>%
+    select(params.value, first_cohort_avg)
+  
+  game_progress_second_cohort <- game_progress_second_cohort %>%
+    select(params.value, second_cohort_avg)
+  
   cohort_game_progress <- full_join(game_progress_first_cohort,
                                     game_progress_second_cohort,
                                     by = "params.value") %>%
     mutate(diff = second_cohort_avg - first_cohort_avg,
            params.value = as.numeric(str_remove_all(params.value, "\\D+"))) %>%
+    full_join(p_value_data,
+              by = "params.value") %>% 
     arrange(params.value)
   
   write.xlsx(cohort_game_progress, paste(args$outdir, "/", base, ".cohort_game_progress.xlsx", sep = "", collapse = ""))
