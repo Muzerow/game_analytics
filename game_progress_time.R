@@ -1,7 +1,9 @@
-
+library(data.table)
 library(dplyr)
 library(readr)
 library(stringr)
+library(lubridate)
+library(tidyr)
 library(openxlsx)
 library(optparse)
 
@@ -22,6 +24,10 @@ parser <- add_option(parser, c("-r", "--sc_end"),
                      help = "Second cohort end date")
 parser <- add_option(parser, c("-b", "--sc_country"),
                      help = "Second cohort country")
+parser <- add_option(parser, c("-m", "--mode"),
+                     help = "Whether to calculate time difference between events or events and install timestamp")
+parser <- add_option(parser, c("-u", "--units"),
+                     help = "Units to calculate time difference in")
 args <- parse_args(parser)
 
 cohort_subset <- function(data, start, end, country){
@@ -37,48 +43,78 @@ cohort_subset <- function(data, start, end, country){
   return(cohort)
 }
 
-event_time_diff <- function(data, cohort_users) {
-  time_to_reach_block <- data.frame()
+event_time_diff <- function(data, cohort_users, mode, units) {
+  data <- data %>%
+    filter(idDevice %in% cohort_users) %>%
+    mutate(params.value = as.numeric(str_remove_all(params.value, "\\D+"))) %>%
+    rename(`00` = tsInstall) %>% 
+    spread(params.value, tsEvent) %>%
+    select(-duplicate, -eventName, -idCountryISOAlpha2, -idDevice)
   
-  for (i in cohort_users) {
-    first_block <- data %>%
-      filter(idDevice == i,
-             params.value == "['1']") %>%
-      select(idDevice, params.value, tsEvent) %>%
-      rename(time_1 = tsEvent)
+  new_col_names <- c()
+  
+  for (i in colnames(data)) {
+    if (str_length(i) == 1) {
+      i <- str_c("0", i, sep = "")
+    }
     
-    last_block <- data %>%
-      filter(idDevice == i,
-             params.value == "['29']") %>%
-      select(idDevice, params.value, tsEvent) %>%
-      rename(time_29 = tsEvent)
-    
-    user_block <- inner_join(first_block, last_block, by = "idDevice")
-    
-    time_to_reach_block <- rbind(time_to_reach_block, user_block)
+    new_col_names <- c(new_col_names, i)
   }
   
-  time_to_reach_block <- time_to_reach_block %>%
-    mutate(diff = difftime(time_29, time_1, units = "hours")) %>%
-    arrange(diff)
+  colnames(data) <- new_col_names
   
-  time_to_reach_block <- data.frame(metric = c("mean_time_diff", "median_time_diff"),
-                                    value = c(mean(time_to_reach_block$diff), median(time_to_reach_block$diff)))
+  data <- data %>%
+    select(sort(current_vars()))
   
-  return(time_to_reach_block)
+  for (i in colnames(select(data, -`00`))) {
+    data <- data %>%
+      mutate(!!paste0("diff",i) := difftime(!!sym(i),
+                                            if (mode == "ie") {
+                                              `00`
+                                            } else {
+                                              !!sym(ifelse(as.numeric(i) - 1 < 10,
+                                                           paste0("0", as.character(as.numeric(i) - 1)),
+                                                           as.character(as.numeric(i) - 1)))
+                                            },
+                                            units = units))
+  }
+  
+  data <- data %>%
+    select(starts_with("diff"))
+  
+  block_time <- data.frame(block = character(),
+                           mean_time = POSIXct(),
+                           median_time = POSIXct())
+  
+  for (i in colnames(data)) {
+    block_stats <- data %>%
+      select(starts_with(i)) %>%
+      rename(block = !!sym(i))
+    
+    block_table <- data.frame(block = i,
+                              mean_time = mean(block_stats$block, na.rm = T),
+                              median_time = median(block_stats$block, na.rm = T))
+    
+    block_time <- rbind(block_time,
+                        block_table)
+  }
+  
+  block_time <- block_time %>%
+    mutate(block = as.numeric(str_remove(block, "diff")))
+  
+  return(block_time)
 }
 
 
 main <- function(args){
   base <- sub(".csv", "", basename(args$infile))
   
-  data <- read.csv("minetap_28.02.csv") %>%
+  data <- fread(args$infile) %>%
     mutate(tsInstall = as.POSIXct(tsInstall, origin = "1970-01-01"),
            tsEvent = as.POSIXct(tsEvent, origin = "1970-01-01")) %>%
     arrange(idDevice, tsEvent) %>%
     select(idCountryISOAlpha2, tsInstall, idDevice, eventName, params.value, tsEvent) %>%
-    filter(eventName == "maxOpenBlock",
-           params.value %in% c("['1']", "['29']"))
+    filter(eventName == "maxOpenBlock")
   
   cohorts <- data %>%
     select(idCountryISOAlpha2, idDevice, tsInstall) %>%
@@ -100,17 +136,24 @@ main <- function(args){
     filter(duplicate == FALSE)
   
   event_time_diff_first_cohort <- event_time_diff(data = data,
-                                                  cohort_users = first_cohort$idDevice) %>%
-    rename(value_first_cohort = value)
+                                                  cohort_users = first_cohort$idDevice,
+                                                  mode = args$mode,
+                                                  units = args$units) %>%
+    rename(mean_time_first_cohort = mean_time,
+           median_time_first_cohort = median_time)
   
   event_time_diff_second_cohort <- event_time_diff(data = data,
-                                                   cohort_users = second_cohort$idDevice) %>%
-    rename(value_second_cohort = value)
+                                                   cohort_users = second_cohort$idDevice,
+                                                   mode = args$mode,
+                                                   units = args$units) %>%
+    rename(mean_time_second_cohort = mean_time,
+           median_time_second_cohort = median_time)
   
   game_complete_time <- full_join(event_time_diff_first_cohort,
                                   event_time_diff_second_cohort,
-                                  by = "metric") %>%
-    mutate(diff = value_second_cohort - value_first_cohort)
+                                  by = "block") %>%
+    mutate(mean_diff = mean_time_second_cohort - mean_time_first_cohort,
+           median_diff = median_time_second_cohort - median_time_first_cohort)
   
   write.xlsx(game_complete_time, paste(args$outdir, "/", base, ".game_complete_time.xlsx", sep = "", collapse = ""))
 }
