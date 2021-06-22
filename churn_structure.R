@@ -1,7 +1,7 @@
 library(dplyr)
 library(openxlsx)
-library(xlsx)
 library(optparse)
+library(xlsx)
 
 parser <- OptionParser()
 parser <- add_option(parser, c("-i", "--infile"),
@@ -24,8 +24,7 @@ day_churned <- function(data, cohort_start, cohort_end, days_churn) {
     slice_tail(n = 1) %>%
     ungroup() %>%
     mutate(day_churned = as.numeric(difftime(as.Date(tsEvent), as.Date(tsInstall), units = "days"))) %>%
-    filter(difftime(Sys.Date(), as.Date(tsEvent), units = "days") > days_churn) %>%
-    select(idDevice, day_churned)
+    filter(difftime(Sys.Date(), as.Date(tsEvent), units = "days") > days_churn)
 }
 
 main <- function(args) {
@@ -49,11 +48,18 @@ main <- function(args) {
     mutate(prop = n / nrow(day_churned_users)) %>%
     arrange(day_churned)
   
-  write.xlsx(day_churned_count, paste0(args$outdir, "/", base, ".test.xlsx"))
-  
   addDataFrame(day_churned_count, sheet)
   
-  for (i in day_churned_count[1:15,]$day_churned) {
+  sheet <- createSheet(churn_structure, sheetName = "Event Churned")
+  
+  event_churned_count <- day_churned_users %>%
+    count(eventName, params.name, params.value) %>%
+    mutate(prop = n / nrow(day_churned_users)) %>%
+    arrange(-n)
+  
+  addDataFrame(event_churned_count, sheet)
+  
+  for (i in day_churned_count$day_churned) {
     sheet <- createSheet(churn_structure, sheetName = paste("Day", i, sep = " "))
 
     last_event_count <- data %>%
